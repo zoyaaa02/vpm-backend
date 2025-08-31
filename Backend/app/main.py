@@ -68,18 +68,23 @@ print(f"✅ Loaded {len(product_metadata)} products")
 
 
 def get_image_embedding(image: Image.Image) -> np.ndarray:
-    # Always wrap the image in a list and add padding
+    # Always wrap in a list for batch format
     inputs = processor(
         images=[image],
         return_tensors="pt",
-        padding=True
-    ).to(device)
+        padding=True,
+        truncation=True
+    )
+
+    # Move each tensor in the dict to the right device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
     with torch.no_grad():
         emb = model.get_image_features(**inputs)
         emb = emb / emb.norm(p=2, dim=-1, keepdim=True)
 
-    return emb.cpu().numpy().reshape(-1)
+    return emb.cpu().numpy().flatten()
+
 
 SIMILARITY_THRESHOLD = 0.7 
 
@@ -206,4 +211,5 @@ def get_products(
         results = [p for p in results if float(p.get("price", 0)) <= max_price]
 
     return {"products": results}
+
 
