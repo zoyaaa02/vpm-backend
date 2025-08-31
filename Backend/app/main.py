@@ -1,33 +1,36 @@
-
 import io
 import json
+import uuid
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import requests
 import torch
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 from transformers import CLIPProcessor, CLIPModel
-from fastapi import Query
-from typing import Optional
-import uuid
 
+# ==============================
+# Paths & Config
+# ==============================
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BACKEND_DIR / "data"
-EMBEDDINGS_FILE = DATA_DIR / "product_embeddings.json" 
-
+EMBEDDINGS_FILE = DATA_DIR / "product_embeddings.json"
 TOP_K = 7
+SIMILARITY_THRESHOLD = 0.6
 
-
+# ==============================
+# FastAPI App
+# ==============================
 app = FastAPI(title="Visual Product Matcher API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # ⚠️ In production replace "*" with your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,9 +43,12 @@ if DATA_DIR.exists():
 else:
     print("⚠️ Warning: static data folder not found:", DATA_DIR)
 
-
+# ==============================
+# Load Model & Embeddings
+# ==============================
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Loading CLIP model on {device}...")
+
 model_name = "openai/clip-vit-base-patch32"
 model = CLIPModel.from_pretrained(model_name).to(device)
 processor = CLIPProcessor.from_pretrained(model_name)
@@ -67,15 +73,12 @@ product_metadata = [{k: v for k, v in p.items() if k != "embedding"} for p in pr
 print(f"✅ Loaded {len(product_metadata)} products")
 
 
+# ==============================
+# Utils
+# ==============================
 def get_image_embedding(image: Image.Image) -> np.ndarray:
-    # Wrap in list and add padding=True to prevent tensor errors
-    inputs = processor(
-        images=[image],
-        return_tensors="pt",
-        padding=True
-    )
-
-    # Move tensors safely to device
+    """Convert image to CLIP embedding"""
+    inputs = processor(images=[image], return_tensors="pt", padding=True)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     with torch.no_grad():
@@ -85,15 +88,12 @@ def get_image_embedding(image: Image.Image) -> np.ndarray:
     return emb.cpu().numpy().flatten()
 
 
-
-SIMILARITY_THRESHOLD = 0.7 
-
-def search_similar_products(query_emb: np.ndarray, similarity_threshold: float = 0.8):
+def search_similar_products(query_emb: np.ndarray, similarity_threshold: float = SIMILARITY_THRESHOLD):
     sims = np.dot(product_embeddings, query_emb)
     results = []
 
     for idx, score in enumerate(sims):
-        if score >= similarity_threshold:  
+        if score >= similarity_threshold:
             meta = product_metadata[idx]
             results.append({
                 "id": meta.get("id", idx + 1),
@@ -107,18 +107,24 @@ def search_similar_products(query_emb: np.ndarray, similarity_threshold: float =
                 "score": float(score),
             })
 
-    # Sort results by descending similarity
     results.sort(key=lambda x: x["score"], reverse=True)
-    return results
+    return results[:TOP_K]
 
 
+# ==============================
+# Routes
+# ==============================
 class URLRequest(BaseModel):
     url: str
 
+
 @app.get("/")
 def root():
-    return {"message": "Welcome to Visual Product Matcher API 🚀", 
-            "endpoints": ["/ping", "/search/file", "/search/url", "/products", "/static/..."]}
+    return {
+        "message": "Welcome to Visual Product Matcher API 🚀",
+        "endpoints": ["/ping", "/search/file", "/search/url", "/products", "/static/..."]
+    }
+
 
 @app.get("/ping")
 def ping():
@@ -134,9 +140,9 @@ async def search_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid image file.")
 
     query_emb = get_image_embedding(image)
-    results = search_similar_products(query_emb, similarity_threshold=0.6)
+    results = search_similar_products(query_emb)
 
-    if len(results) == 0:
+    if not results:
         return {"results": [], "message": "No similar product found"}
 
     return {"results": results}
@@ -152,16 +158,17 @@ def search_url(req: URLRequest):
         raise HTTPException(status_code=400, detail="Could not fetch or decode image from URL.")
 
     query_emb = get_image_embedding(image)
-    results = search_similar_products(query_emb, similarity_threshold=0.6)
+    results = search_similar_products(query_emb)
 
-    if len(results) == 0:
+    if not results:
         return {"results": [], "message": "No similar product found"}
 
     return {"results": results}
 
 
-
+# Async search (optional)
 SEARCH_RESULTS = {}
+
 
 @app.post("/search")
 async def start_search(file: UploadFile = File(None), image_url: str = None):
@@ -183,11 +190,13 @@ async def start_search(file: UploadFile = File(None), image_url: str = None):
 
     return {"query_id": query_id}
 
+
 @app.get("/search/result/{query_id}")
 async def get_results(query_id: str):
     if query_id not in SEARCH_RESULTS:
         raise HTTPException(status_code=404, detail="Query ID not found")
     return {"results": SEARCH_RESULTS[query_id]}
+
 
 @app.get("/products")
 def get_products(
@@ -211,7 +220,3 @@ def get_products(
         results = [p for p in results if float(p.get("price", 0)) <= max_price]
 
     return {"products": results}
-
-
-
-
