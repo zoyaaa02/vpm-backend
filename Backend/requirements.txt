@@ -1,9 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 fastapi
 uvicorn
-torch==2.2.0+cpu ; sys_platform == "linux"
+torch==2.2.0+cpu
 transformers==4.37.0
 pillow
 numpy
 requests
 python-multipart
---extra-index-url https://download.pytorch.org/whl/cpu
