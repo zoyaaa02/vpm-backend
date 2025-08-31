@@ -68,15 +68,13 @@ print(f"✅ Loaded {len(product_metadata)} products")
 
 
 def get_image_embedding(image: Image.Image) -> np.ndarray:
-    # Always wrap in a list for batch format
+    # Wrap in list to enforce batch format
     inputs = processor(
         images=[image],
-        return_tensors="pt",
-        padding=True,
-        truncation=True
+        return_tensors="pt"
     )
 
-    # Move each tensor in the dict to the right device
+    # Move tensors safely to device
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     with torch.no_grad():
@@ -211,5 +209,6 @@ def get_products(
         results = [p for p in results if float(p.get("price", 0)) <= max_price]
 
     return {"products": results}
+
 
 
