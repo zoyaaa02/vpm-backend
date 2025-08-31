@@ -68,10 +68,11 @@ print(f"✅ Loaded {len(product_metadata)} products")
 
 
 def get_image_embedding(image: Image.Image) -> np.ndarray:
-    # Wrap in list to enforce batch format
+    # Wrap in list and add padding=True to prevent tensor errors
     inputs = processor(
         images=[image],
-        return_tensors="pt"
+        return_tensors="pt",
+        padding=True
     )
 
     # Move tensors safely to device
@@ -82,6 +83,7 @@ def get_image_embedding(image: Image.Image) -> np.ndarray:
         emb = emb / emb.norm(p=2, dim=-1, keepdim=True)
 
     return emb.cpu().numpy().flatten()
+
 
 
 SIMILARITY_THRESHOLD = 0.7 
@@ -209,6 +211,7 @@ def get_products(
         results = [p for p in results if float(p.get("price", 0)) <= max_price]
 
     return {"products": results}
+
 
 
 
